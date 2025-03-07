@@ -476,7 +476,7 @@ import { useNavigate } from "react-router-dom";
 const AuthContext = createContext();
 
 export const AuthProvider = ({children}) => {
-  const authAPI = "http://localhost:5001/auth";
+  const authAPI = "https://task-backend-suak.onrender.com/auth";
 
   const [user, setUser] = useState(null);
   const navigate = useNavigate();
@@ -551,7 +551,7 @@ export const AuthProvider = ({children}) => {
 
   const logout = async () => {
     try {
-      await fetch("http://localhost:5001/auth/logout", {
+      await fetch("https://task-backend-suak.onrender.com/auth/logout", {
         method: "POST",
         credentials: "include",
       });
@@ -582,7 +582,7 @@ const ProjectContext = createContext();
 export const ProjectProvider = ({children}) => {
     const [leaders, setLeaders] = useState([]);
     const [projects, setProjects] = useState([]);
-    const projectAPI = "http://localhost:5001/project";
+    const projectAPI = "https://task-backend-suak.onrender.com/project";
 
     // Fetch project leaders from backend
     const fetchLeaders = async () => {

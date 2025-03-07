@@ -1,0 +1,1665 @@
+project structure:
+backend
+frontend
+
+backend:
+
+ManageMate Website\backend\src\config\db.js:
+const mongoose = require("mongoose");
+const connectDB = async () => {
+    try{
+        await mongoose.connect(process.env.MONGO_URI);
+        console.log("Successfully connected to database.");
+    }
+    catch(err){
+        console.log("Connection to db failed: ",err.message);
+        process.exit(1);
+    }
+}
+module.exports = connectDB;
+
+
+ManageMate Website\backend\src\controllers\authController.js:
+
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const User = require("../models/User");
+
+const register = async (req, res) => {
+    const {name, email, password, role} = req.body;
+
+    if(!name || !email || !password || !role){
+        return res.status(400).json({message: "All fields are required"});
+    }
+
+    let user = await User.findOne({ email });
+    if (user) return res.status(400).json({ message: "User already exists" });
+
+    try{
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        user = new User({name, email, password: hashedPassword, role});
+        await user.save();  
+
+        res.status(201).json({message: "User registered successfully"});
+    }
+    catch(err){
+        return res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+const login = async (req, res) => {
+    try{
+        const {email, password} = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ message: "Email and password are required" });
+        }
+
+        const user = await User.findOne({email});
+        if (!user) return res.status(400).json({ message: "User does not exists" });
+
+        const validPassword = await bcrypt.compare(password, user.password);
+        
+        if(!validPassword){
+            return res.status(400).json({message: "Incorrect password"});
+        }
+
+        const token = jwt.sign({id:user._id, role: user.role}, process.env.JWT_SECRET, {expiresIn: "1d"});
+        res.cookie("token", token, {
+            httpOnly: true,
+            sameSite: "strict"
+        });
+
+        res.json({message: "Login successful", token, user});
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+const getProfile = async (req, res) => {
+    try{
+        const user = await User.findById(req.user.id).select("-password");
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        res.json({
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            created_at: new Date(user.createdAt).toLocaleString()
+        });
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+const logout = (req, res) => {
+    res.clearCookie("token");
+    res.json({message: "Logged out successfully"});
+}
+
+module.exports = {register, login, getProfile, logout};
+
+ManageMate Website\backend\src\controllers\projectController.js:
+const Project = require("../models/Project");
+const User = require("../models/User");
+
+const createProject = async (req, res) => {
+    try{
+        if(req.user.role !== "Manager"){
+            return res.status(401).json({message: "Access Denied. Only accessible to Managers"});
+        }
+
+        const {name, description, projectLeader, deadline} = req.body;
+
+        const formattedDeadline = new Date(deadline);
+
+        const project = new Project({name, description, managerId: req.user.id, projectLeader, deadline: formattedDeadline});
+
+        await project.save();
+        res.status(201).json({message: "Project created successfully", project});
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+const getProjects = async (req, res) => {
+    try{
+        let projects;
+
+        if (req.user.role === "Manager") {
+            projects = await Project.find({ managerId: req.user.id }).populate("projectLeader");
+        } 
+        else if (req.user.role === "Project Leader") {
+            projects = await Project.find({ projectLeader: req.user.id }).populate("projectLeader");
+        } 
+        else {
+            return res.status(403).json({ message: "Access Denied" });
+        }
+        
+        res.status(201).json(projects);
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+const getProjectLeaders = async (req, res) => {
+    try{
+        if(req.user.role !== "Manager"){
+            return res.status(401).json({message: "Access Denied. Only accessible to Managers"});
+        }
+
+        const leaders = await User.find({role: "Project Leader"}).select("name _id");
+        res.json(leaders);
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+module.exports = {createProject, getProjects, getProjectLeaders};
+
+
+ManageMate Website\backend\src\controllers\taskController.js:
+const Task = require("../models/Task");
+
+const createTask = async (req, res) => {
+    try{
+        if(req.user.role !== "Project Leader"){
+            return res.status(401).json({message: "Access Denied"});
+        }
+
+        const {title, description, projectId, assignedTo, deadline} = req.body;
+        const task = new Task({title, description, projectId, assignedTo, deadline});
+
+        await task.save();
+        res.status(201).json({message: "Task created successfully", task});
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+const getTasks = async (req, res) => {
+    try{
+        let tasks;
+        if(req.user.role === "Manager"){
+            tasks = await Task.find().populate("assignedTo projectId");
+        }
+        else if(req.user.role === "Project Leader"){
+            tasks = await Task.find({projectId: req.body.projectId}).populate("assignedTo");
+        }
+        else{
+            tasks = await Task.find({assignedTo: req.user.id});
+        }
+
+        res.status(201).json(tasks);
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+module.exports = {createTask, getTasks};
+
+
+ManageMate Website\backend\src\controllers\teamMemberController.js:
+const Task = require("../models/Task");
+
+const updateTask = async (req, res) => {
+    try{
+        const taskId = req.params.id;
+        const {status, progress} = req.body;
+
+        let task = await Task.findById(taskId);
+        if(!task){
+            return res.status(404).json({message: "Task not found"});
+        }
+
+        if(progress !== undefined){
+            task.progress = progress;
+
+            if(!status){
+                if(progress>0 && progress<100){
+                    task.status = "In Progress";
+                }
+                else if(progress === 100){
+                    task.status = "Completed";
+                }
+            }
+        }
+
+        if(status){
+            task.status = status;
+        }
+
+        await task.save();
+        res.status(201).json({message: "Task updated successfully", task});
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+module.exports = {updateTask};
+
+
+ManageMate Website\backend\src\middlewares\authMiddleware.js:
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
+
+const authMiddleware = async (req, res, next) => {
+    const token = req.cookies.token;
+
+    if(!token){
+        return res.status(401).json({message: "Access denied. No token provided"});
+    }
+
+    try{
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = verified;
+        next();
+    }
+    catch(err){
+        res.status(500).json({ message: "Server Error", err });
+    }
+}
+
+module.exports = {authMiddleware};
+
+
+ManageMate Website\backend\src\models\Project.js:
+const mongoose = require("mongoose");
+
+const projectSchema = new mongoose.Schema({
+    name: {type: String, require: true},
+    description: {type: String},
+    managerId: {type: mongoose.Schema.Types.ObjectId, ref: "User", required: true},
+    projectLeader: {type: mongoose.Schema.Types.ObjectId, ref: "User", required: true},
+    deadline: { type: Date, required: true }, 
+    tasks: [{type: mongoose.Schema.Types.ObjectId, ref: "Task"}],
+    status: {type: String, enum: ["Not Started", "In Progress", "Completed"], default: "Not Started"}
+});
+
+module.exports = mongoose.model("Project", projectSchema);
+
+
+ManageMate Website\backend\src\models\Task.js:
+const mongoose = require("mongoose");
+
+const taskSchema = new mongoose.Schema({
+    title: {type: String, required: true},
+    description: {type: String},
+    projectId: {type: mongoose.Schema.Types.ObjectId, ref: "User", required: true},
+    assignedTo: {type: mongoose.Schema.Types.ObjectId, ref: "User", required: true},
+    status: {type: String, enum: ["To Do", "In Progress", "Completed"], default: "To Do"},
+    deadline: {type: Date},
+    progress: {type: Number, min: 0, max: 100, default: 0}
+});
+
+module.exports = mongoose.model("Task", taskSchema);
+
+
+ManageMate Website\backend\src\models\User.js:
+const mongoose = require("mongoose");
+
+const userSchema = new mongoose.Schema({
+    name: {type: String, required: true},
+    email: {type: String, required: true, unique: true},
+    password: {type: String, required: true},
+    role: {type: String, enum: ["Manager", "Project Leader", "Team Member"], required: true},
+    assignedProject: [{type: mongoose.Schema.Types.ObjectId, ref: "Project"}]
+}, {timestamps: true});
+
+module.exports = mongoose.model("User", userSchema);
+
+
+ManageMate Website\backend\src\routes\authRoutes.js:
+const express = require("express");
+const {register, login, getProfile, logout} = require("../controllers/authController");
+const {authMiddleware} = require("../middlewares/authMiddleware");
+const router = express.Router();
+
+router.post("/register", register);
+router.post("/login", login);
+router.post("/logout", logout);
+router.get("/profile", authMiddleware, getProfile);
+
+module.exports = router;
+
+
+ManageMate Website\backend\src\routes\projectRoutes.js:
+const express = require("express");
+const {createProject, getProjects, getProjectLeaders} = require("../controllers/projectController");
+const {authMiddleware} = require("../middlewares/authMiddleware");
+const router = express.Router();
+
+router.post("/createProject", authMiddleware, createProject);
+router.get("/", authMiddleware, getProjects);
+router.get("/leaders", authMiddleware, getProjectLeaders);
+
+module.exports = router;
+
+
+ManageMate Website\backend\src\routes\taskRoutes.js:
+const express = require("express");
+const {createTask, getTasks} = require("../controllers/taskController");
+const {updateTask} = require("../controllers/teamMemberController");
+const {authMiddleware} = require("../middlewares/authMiddleware");
+const router = express.Router();
+
+router.post("/createTask", authMiddleware, createTask);
+router.get("/", authMiddleware, getTasks);
+router.put("/updateTask/:id", authMiddleware, updateTask);
+
+module.exports = router;
+
+
+ManageMate Website\backend\.env:
+PORT=5001
+MONGO_URI=mongodb://localhost:27017/manageMate
+JWT_SECRET=$N(A))CBvQ0a(C_k$w&$j$6mo<*hXy@q
+
+
+ManageMate Website\backend\server.js:
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const mongoose = require("mongoose");
+const bodyParser = require("body-parser");
+const cookieParser = require("cookie-parser");
+const connectDB = require("./src/config/db");
+const authRoutes = require("./src/routes/authRoutes");
+const projectRoutes = require("./src/routes/projectRoutes");
+const taskRoutes = require("./src/routes/taskRoutes");
+
+const app = express();
+
+
+app.use(cors({
+    origin: "http://localhost:5173",
+    credentials: true
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+app.use(cookieParser());
+
+app.use("/auth", authRoutes);
+app.use("/project", projectRoutes);
+app.use("/tasks", taskRoutes);
+
+const PORT = process.env.PORT || 5000;
+
+connectDB();
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+
+ManageMate Website\frontend\src\components\Layout.jsx:
+import { Outlet, useLocation } from "react-router-dom";
+import Sidebar from "./Sidebar";
+
+const Layout = () => {
+    const location = useLocation();
+  
+    // Hide Sidebar on Login Page and Register
+    if (location.pathname === "/" || location.pathname === "/register") {
+      return <Outlet />; 
+    }
+  
+    return (
+      <div className="flex">
+        <Sidebar />
+        <div className="flex-grow p-4">
+          <Outlet /> 
+        </div>
+      </div>
+    );
+  };
+  
+  export default Layout;
+
+
+ManageMate Website\frontend\src\components\Sidebar.jsx:
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const Sidebar = () => {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className="h-screen w-64 bg-gray-900 text-white flex flex-col p-6 fixed left-0 top-0">
+      <h2 className="text-2xl font-bold mb-6">ManageMate</h2>
+
+      <nav className="flex flex-col space-y-4">
+        <Link to="/dashboard" className="hover:text-blue-400">Dashboard</Link>
+        <Link to="/projects" className="hover:text-blue-400">Projects</Link>
+
+        {user?.role === "Manager" && (
+          <Link to="/add-project" className="hover:text-blue-400">Add Project</Link>
+        )}
+
+        {user?.role === "Project Leader" && (
+          <Link to="/tasks" className="hover:text-blue-400">Manage Tasks</Link>
+        )}
+
+        {user?.role === "Team Member" && (
+          <Link to="/tasks" className="hover:text-blue-400">My Tasks</Link>
+        )}
+      </nav>
+
+      <button
+        onClick={logout}
+        className="mt-auto bg-red-500 px-4 py-2 rounded hover:bg-red-700 transition"
+      >
+        Logout
+      </button>
+    </div>
+  );
+};
+
+export default Sidebar;
+
+
+ManageMate Website\frontend\src\context\AuthContext.jsx:
+import { createContext, useContext, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+
+const AuthContext = createContext();
+
+export const AuthProvider = ({children}) => {
+  const authAPI = "http://localhost:5001/auth";
+
+  const [user, setUser] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem("user"));
+    if(storedUser){
+      setUser(storedUser);
+    }
+  }, []);
+
+  const login = async (email, password) => {
+    try{
+      const response = await fetch(`${authAPI}/login`,{
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email, password}),
+        credentials: "include"
+      });
+
+      const data = await response.json();
+
+      if(!response.ok){
+        throw new Error(data.message || "Login failed");
+      }
+
+      const userData = {
+        id: data.user._id,
+        name: data.user.name,
+        email: data.user.email,
+        role: data.user.role,
+        token: data.token,
+      };
+
+      localStorage.setItem("user", JSON.stringify(userData));
+      setUser(userData);
+
+      navigate("/dashboard");
+
+      return true;
+    }
+    catch (error) {
+      console.error("Login error:", error);
+      return false;
+    }
+  }
+
+  const register = async (name, email, password, role) => {
+    try{
+      const response = await fetch(`${authAPI}/register`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name, email, password, role}),
+        credentials: "include"
+      });
+
+      const data = await response.json();
+
+      if(!response.ok){
+        throw new Error(data.message || "Registration failed");
+      }
+
+      navigate("/");
+
+      return true;
+    }
+    catch (error) {
+      console.error("Registration error:", error);
+      return false;
+    }
+  }
+
+  const logout = async () => {
+    try {
+      await fetch("http://localhost:5001/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      localStorage.removeItem("user");
+      setUser(null);
+      navigate("/");
+    } catch (error) {
+      console.error("Logout error:", error.message);
+    }
+  }
+
+  return(
+    <AuthContext.Provider value={{user, register, login, logout}}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export const useAuth = () => useContext(AuthContext);
+
+
+ManageMate Website\frontend\src\context\ProjectContext.jsx:
+import { createContext, useContext, useState, useEffect } from "react";
+
+const ProjectContext = createContext();
+
+export const ProjectProvider = ({children}) => {
+    const [leaders, setLeaders] = useState([]);
+    const [projects, setProjects] = useState([]);
+    const projectAPI = "http://localhost:5001/project";
+
+    // Fetch project leaders from backend
+    const fetchLeaders = async () => {
+        try{
+            const response = await fetch(`${projectAPI}/leaders`, {
+                method: "GET",
+                credentials: "include"
+            });
+
+            if(!response.ok){
+                throw new Error("Failed to fetch leaders");
+            }
+
+            const data = await response.json();
+            setLeaders(data);
+        }
+        catch (error) {
+            console.error("Error fetching leaders:", error.message);
+        }
+    }
+
+    //Fetch projects from backend
+    const fetchProjects = async () => {
+        try{
+            const response = await fetch(`${projectAPI}/`,{
+                method: "GET",
+                credentials: "include"
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to fetch projects");
+            }
+
+            const data = await response.json();
+            setProjects(data);
+        }
+        catch (error) {
+            console.error("Error fetching projects:", error.message);
+        }
+    }
+
+    //Create new project
+    const createProject = async (projectData) => {
+        try{
+            const response = await fetch(`${projectAPI}/createProject`,{
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                credentials: "include",
+                body: JSON.stringify(projectData)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Project creation failed");
+            }
+
+            const newProject = await response.json();
+            setProjects((prevProjects) => [...prevProjects, newProject.project]);
+
+            return true;
+        }
+        catch (error) {
+            console.error("Error creating project:", error.message);
+            return false;
+        }
+    }
+
+    useEffect(() =>{
+        fetchLeaders();
+        fetchProjects();
+    }, []);
+
+    return(
+        <ProjectContext.Provider value={{leaders, projects, fetchProjects, createProject}}>
+            {children}
+        </ProjectContext.Provider>
+    );
+}
+
+export const useProject = () => useContext(ProjectContext);
+
+
+ManageMate Website\frontend\src\pages\AddProject.jsx:
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useProject } from "../context/ProjectContext";
+
+const AddProject = () => {
+  const [projectName, setProjectName] = useState("");
+  const [description, setDescription] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [selectedLeader, setSelectedLeader] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const { leaders, createProject } = useProject();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!projectName || !selectedLeader || !deadline) {
+      alert("Please fill all required fields!");
+      return;
+    }
+
+    const newProject = {
+      name: projectName,
+      description: description ? description : null,
+      projectLeader: selectedLeader,
+      deadline: new Date(deadline).toISOString()
+    };
+
+    const success = await createProject(newProject);
+    if(success){
+      setSuccess(true);
+      setTimeout(() => {
+        setSuccess(false);
+        navigate('/projects');
+      }, 1000);
+    }
+  }
+
+  return (
+    <div className="p-6 max-w-lg mx-auto bg-white rounded shadow">
+      <h2 className="text-2xl font-bold mb-4">Add New Project</h2>
+      {success && <p className="text-green-500 mb-4">Project added successfully!</p>}
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label className="block text-gray-700">Project Name</label>
+          <input
+            type="text"
+            className="w-full p-2 border rounded"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Description</label>
+          <textarea
+            className="w-full p-2 border rounded"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          ></textarea>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Assign to Project Leader</label>
+          <select
+            className="w-full p-2 border rounded"
+            value={selectedLeader}
+            onChange={(e) => setSelectedLeader(e.target.value)}
+            required
+          >
+            <option value="">Select Leader</option>
+            {leaders.map((leader) => (
+              <option key={leader._id} value={leader._id}>{leader.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Deadline</label>
+          <input
+            type="date"
+            className="w-full p-2 border rounded"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            required
+          />
+        </div>
+
+        <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">
+          Add Project
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default AddProject;
+
+
+ManageMate Website\frontend\src\pages\AddTask.jsx:
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+
+const AddTask = () => {
+  const { projectId } = useParams(); // Get project ID from URL
+  const navigate = useNavigate();
+  const [taskName, setTaskName] = useState("");
+  const [description, setDescription] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [members, setMembers] = useState([]);
+  const [assignedMember, setAssignedMember] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    // Dummy members list (this should come from a database in a real app)
+    setMembers([
+      { id: 1, name: "Alice" },
+      { id: 2, name: "Bob" },
+    ]);
+  }, []);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    if (!taskName || !description || !assignedMember || !deadline) {
+      alert("Please fill all fields!");
+      return;
+    }
+
+    const newTask = {
+      id: Date.now(),
+      projectId: Number(projectId), // ✅ Associate task with project
+      name: taskName,
+      description,
+      assignedTo: assignedMember,
+      deadline,
+      status: "Pending",
+    };
+
+    // ✅ Store in localStorage
+    let tasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    tasks.push(newTask);
+    localStorage.setItem("tasks", JSON.stringify(tasks));
+
+    setSuccess(true);
+    setTimeout(() => {
+      setSuccess(false);
+      navigate(`/tasks/${projectId}`); // ✅ Redirect to View Tasks page
+    }, 1000);
+  };
+
+  return (
+    <div className="p-6 max-w-lg mx-auto bg-white rounded shadow">
+      <h2 className="text-2xl font-bold mb-4">Create Task</h2>
+      {success && <p className="text-green-500 mb-4">Task added successfully!</p>}
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label className="block text-gray-700">Task Name</label>
+          <input
+            type="text"
+            className="w-full p-2 border rounded"
+            value={taskName}
+            onChange={(e) => setTaskName(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Description</label>
+          <textarea
+            className="w-full p-2 border rounded"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+          ></textarea>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Assign to Member</label>
+          <select
+            className="w-full p-2 border rounded"
+            value={assignedMember}
+            onChange={(e) => setAssignedMember(e.target.value)}
+            required
+          >
+            <option value="">Select Member</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.name}>{member.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Deadline</label>
+          <input
+            type="date"
+            className="w-full p-2 border rounded"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            required
+          />
+        </div>
+
+        <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">
+          Create Task
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default AddTask;
+
+
+ManageMate Website\frontend\src\pages\Dashboard.jsx:
+import { useAuth } from "../context/AuthContext";
+import { useLocation } from "react-router-dom";
+import { useState, useEffect } from "react";
+
+const Dashboard = () => {
+  const { user } = useAuth();
+  const location = useLocation(); 
+  const successMessage = location.state?.message;
+  const [message, setMessage] = useState(location.state?.message);
+
+  // useEffect(() => {
+  //   if (message) {
+  //     const timer = setTimeout(() => {
+  //       setMessage(null);
+  //     }, 3000); 
+
+  //     return () => clearTimeout(timer); 
+  //   }
+  // }, [message]);
+
+  return (
+    <div className="flex h-screen">
+      <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 p-8 ml-64">
+        {/* {message && (
+          <div className="bg-green-500 text-white p-4 rounded-lg mb-4 shadow-md w-3/4 text-center">
+            {message}
+          </div>
+        )} */}
+
+        <h1 className="text-3xl font-bold mb-4 text-gray-900">
+          Welcome, {user?.name} 
+        </h1>
+        <p className="text-lg mb-4 text-gray-700">Role: {user?.role}</p>
+  
+        {/* Role-based Content */}
+        {user?.role === "Manager" && (
+          <div className="bg-gray-900 text-white p-6 rounded-lg shadow-lg w-3/4 text-center">
+            <h2 className="text-xl font-semibold mb-2">Project Management</h2>
+            <p className="text-gray-300">You can add and assign projects.</p>
+          </div>
+        )}
+  
+        {user?.role === "Project Leader" && (
+          <div className="bg-gray-900 text-white p-6 rounded-lg shadow-lg w-3/4 text-center">
+            <h2 className="text-xl font-semibold mb-2">Project Overview</h2>
+            <p className="text-gray-300">You can view and manage assigned projects.</p>
+          </div>
+        )}
+  
+        {user?.role === "Team Member" && (
+          <div className="bg-gray-900 text-white p-6 rounded-lg shadow-lg w-3/4 text-center">
+            <h2 className="text-xl font-semibold mb-2">Task List</h2>
+            <p className="text-gray-300">You can view and update your tasks.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+  
+};
+
+export default Dashboard;
+
+
+ManageMate Website\frontend\src\pages\EditProject.jsx:
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+
+const EditProject = ({ projects, updateProject }) => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const projectToEdit = projects.find((project) => project.id === Number(id));
+
+  const [projectName, setProjectName] = useState("");
+  const [description, setDescription] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [leaders, setLeaders] = useState([]);
+  const [selectedLeader, setSelectedLeader] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    setLeaders([
+      { id: 1, name: "John Doe" },
+      { id: 2, name: "Jane Smith" },
+    ]);
+    if (projectToEdit) {
+      setProjectName(projectToEdit.name || "");
+      setDescription(projectToEdit.description || "");
+      setSelectedLeader(projectToEdit.assignedTo || "");
+      setDeadline(projectToEdit.deadline || "");
+    }
+  }, [projectToEdit]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const updatedProject = {
+      ...projectToEdit, // Preserve all existing properties
+      name: projectName,
+      description,
+      assignedTo: selectedLeader,
+      deadline,
+    };
+
+    updateProject(updatedProject);
+    setSuccess(true);
+    setTimeout(() => {
+      setSuccess(false);
+      navigate("/projects");
+    }, 1000);
+  };
+
+  if (!projectToEdit) {
+    return <p className="text-red-500">Project not found!</p>;
+  }
+
+  return (
+    <div className="p-6 max-w-lg mx-auto bg-white rounded shadow">
+      <h2 className="text-2xl font-bold mb-4">Edit Project</h2>
+      {success && <p className="text-green-500 mb-4">Project updated successfully!</p>}
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label className="block text-gray-700">Project Name</label>
+          <input
+            type="text"
+            className="w-full p-2 border rounded"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Description</label>
+          <textarea
+            className="w-full p-2 border rounded"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+          ></textarea>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Assign to Project Leader</label>
+          <select
+            className="w-full p-2 border rounded"
+            value={selectedLeader}
+            onChange={(e) => setSelectedLeader(e.target.value)}
+            required
+          >
+            <option value="">Select Leader</option>
+            {leaders.map((leader) => (
+              <option key={leader.id} value={leader.name}>{leader.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Deadline</label>
+          <input
+            type="date"
+            className="w-full p-2 border rounded"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            required
+          />
+        </div>
+
+        <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">
+          Update Project
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default EditProject;
+
+
+ManageMate Website\frontend\src\pages\EditTask.jsx:
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+
+const EditTask = ({ tasks, updateTask }) => {
+  const { taskId } = useParams();
+  const navigate = useNavigate();
+
+  // ✅ Get the task from state OR localStorage
+  const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+  const taskToEdit = tasks.find((task) => task.id === Number(taskId)) ||
+                     storedTasks.find((task) => task.id === Number(taskId));
+
+  const [taskName, setTaskName] = useState("");
+  const [description, setDescription] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    if (taskToEdit) {
+      setTaskName(taskToEdit.name);
+      setDescription(taskToEdit.description);
+      setDeadline(taskToEdit.deadline);
+      setStatus(taskToEdit.status);
+    }
+  }, [taskToEdit]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+  
+    const updatedTask = {
+      ...taskToEdit,
+      name: taskName,
+      description,
+      deadline,
+      status,
+    };
+  
+    // ✅ Fetch latest tasks from localStorage
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+  
+    // ✅ Update the correct task in the list
+    const updatedTasks = storedTasks.map((task) =>
+      task.id === updatedTask.id ? updatedTask : task
+    );
+  
+    // ✅ Save updated tasks back to localStorage
+    localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+  
+    // ✅ Update state to reflect changes
+    updateTask(updatedTask);
+  
+    // ✅ Redirect back to View Tasks page
+    navigate(`/tasks/${taskToEdit.projectId}`);
+  };
+  
+
+  if (!taskToEdit) {
+    return <p className="text-red-500 text-center">Task not found!</p>;
+  }
+
+  return (
+    <div className="p-6 max-w-lg mx-auto bg-white rounded shadow">
+      <h2 className="text-2xl font-bold mb-4">Edit Task</h2>
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label className="block text-gray-700">Task Name</label>
+          <input
+            type="text"
+            className="w-full p-2 border rounded"
+            value={taskName}
+            onChange={(e) => setTaskName(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Description</label>
+          <textarea
+            className="w-full p-2 border rounded"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+          ></textarea>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Deadline</label>
+          <input
+            type="date"
+            className="w-full p-2 border rounded"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-gray-700">Status</label>
+          <select
+            className="w-full p-2 border rounded"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            required
+          >
+            <option value="Pending">Pending</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+
+        <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">
+          Update Task
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default EditTask;
+
+
+ManageMate Website\frontend\src\pages\Login.jsx:
+import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { useNavigate, Link  } from "react-router-dom";
+
+const Login = () => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!email || !password) {
+      setError("Please enter both email and password.");
+      return;
+    }
+
+    const success = await login(email, password);
+    if (!success) {
+      setError("Invalid email or password!");
+    } else {
+      alert("User logged in successfully");
+      navigate("/dashboard");
+    }
+  };
+
+  return (
+    <div className="flex justify-center items-center h-screen bg-gray-900">
+      <div className="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+        <h2 className="text-white text-2xl font-semibold mb-4 text-center">
+          Login
+        </h2>
+        {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+        <form onSubmit={handleSubmit} className="flex flex-col">
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mb-3 p-3 rounded bg-gray-700 text-white outline-none"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="mb-3 p-3 rounded bg-gray-700 text-white outline-none"
+          />
+          <button
+            type="submit"
+            className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded transition duration-300"
+          >
+            Login
+          </button>
+        </form>
+        <p className="text-gray-400 text-sm text-center mt-4">
+          Don't have an account? <Link to="/register" className="text-blue-400">Register</Link>
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default Login;
+
+
+ManageMate Website\frontend\src\pages\ProjectList.jsx:
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext"; // Import Auth to check role
+import { useProject } from "../context/ProjectContext"; // Import ProjectContext      
+
+const ProjectList = () => {
+  const { user } = useAuth(); // Get logged-in user details
+  const {projects, fetchProjects} = useProject(); //Get projects from context
+
+  useEffect(() => {
+    if (user) {
+      fetchProjects(); // Fetch projects from backend
+    }
+  }, [user]);
+
+  return (
+    <div className="p-8 ml-64 text-white">
+      <h1 className="text-3xl font-bold mb-4">Projects</h1>
+
+      {user?.role === "Manager" && (
+        <Link
+          to="/add-project"
+          className="bg-green-500 px-4 py-2 rounded hover:bg-green-700 mb-4 inline-block"
+        >
+          + Add Project
+        </Link>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {projects.length === 0 ? (
+          <p className="text-gray-400">No projects assigned yet.</p>
+        ) : (
+          projects.map((project) => (
+            <div
+              key={project._id}
+              className="bg-gray-800 p-4 rounded-lg shadow-lg"
+            >
+              <h2 className="text-xl font-semibold">{project.name}</h2>
+              <p className="text-gray-300">{project.description}</p>
+              <p className="text-sm mt-2">
+                <strong>Assigned to:</strong> {project.projectLeader.name}
+              </p>
+              <p className="text-sm">
+                <strong>Deadline:</strong> {new Date(project.deadline).toLocaleDateString()}
+              </p>
+              <p className="text-sm">
+                <strong>Status:</strong> {project.status}
+              </p>
+
+              {/* Show "Edit Project" button only for Managers */}
+              {user?.role === "Manager" && (
+                <Link
+                  to={`/edit-project/${project.id}`}
+                  className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-700 mt-2 inline-block"
+                >
+                  Edit
+                </Link>
+              )}
+
+              {/* Show "Create Task" & "View Tasks" only for Team Leaders */}
+              {user?.role === "Project Leader" && (
+                <>
+                  <Link
+                    to={`/add-task/${project.id}`}
+                    className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-700 mt-2 inline-block ml-2"
+                  >
+                    Create Task
+                  </Link>
+                  <Link
+                    to={`/tasks/${project.id}`}
+                    className="bg-purple-500 text-white px-3 py-1 rounded hover:bg-purple-700 mt-2 inline-block ml-2"
+                  >
+                    View Tasks
+                  </Link>
+                </>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ProjectList;
+
+
+ManageMate Website\frontend\src\pages\Projects.jsx:
+import { Link } from "react-router-dom";
+
+const Projects = ({ projects }) => {
+  return (
+    <div className="p-8 ml-64 text-white">
+      <h1 className="text-3xl font-bold mb-4">Projects</h1>
+
+      <Link to="/add-project" className="bg-green-500 px-4 py-2 rounded hover:bg-green-700 mb-4 inline-block">
+        + Add Project
+      </Link>
+
+      {projects.length === 0 ? (
+        <p className="text-gray-400">No projects added yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {projects.map((project) => (
+            <div key={project.id} className="bg-gray-800 p-6 rounded-lg shadow-lg">
+              <h2 className="text-xl font-semibold">{project.name}</h2>
+              <p className="text-gray-300">{project.description}</p>
+              <p className="text-sm">Assigned to: {project.assignedTo}</p>
+              <p className="text-sm">Deadline: {project.deadline}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Projects;
+
+
+ManageMate Website\frontend\src\pages\Register.jsx:
+import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { useNavigate, Link } from "react-router-dom";
+
+const Register = () => {
+    const {register} = useAuth();
+    const navigate = useNavigate();
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [role, setRole] = useState("Manager");
+    const [error, setError] = useState("");
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError("");
+
+        if(!name || !email || !password || !role){
+            setError("Please fill in all the fields");
+            return;
+        }
+
+        const success = await register(name, email, password, role);
+        if(!success){
+            setError("Registration failed! Try again.");
+        }
+        else{
+            alert("User registered successfully");
+            navigate("/");
+        }
+    }
+
+    return(
+        <div className="flex justify-center items-center h-screen bg-gray-900">
+            <div className="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+                <h2 className="text-white text-2xl font-semibold mb-4 text-center">
+                    Register
+                </h2>
+                {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                <form onSubmit={handleSubmit} className="flex flex-col">
+                    <input
+                        type="text"
+                        placeholder="Name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="mb-3 p-3 rounded bg-gray-700 text-white outline-none"
+                    />
+                    <input
+                        type="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="mb-3 p-3 rounded bg-gray-700 text-white outline-none"
+                    />
+                    <input
+                        type="password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="mb-3 p-3 rounded bg-gray-700 text-white outline-none"
+                    />
+                    <select
+                        value={role}
+                        onChange={(e) => setRole(e.target.value)}
+                        className="mb-3 p-3 rounded bg-gray-700 text-white outline-none"
+                    >
+                        <option value="Manager">Manager</option>
+                        <option value="Project Leader">Project Leader</option>
+                        <option value="Team Member">Team Member</option>
+                    </select>
+                    <button
+                        type="submit"
+                        className="bg-blue-500 hover:bg-blue-600 text-white py-2 rounded transition duration-300"
+                    >
+                        Register
+                    </button>
+                </form>
+                <p className="text-gray-400 text-sm text-center mt-4">
+                    Already have an account? <Link to="/" className="text-blue-400">Login</Link>
+                </p>
+            </div>
+        </div>
+    );
+}
+
+export default Register;
+
+
+ManageMate Website\frontend\src\pages\TaskList.jsx:
+import { useState, useEffect } from "react";
+import { useParams, Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const TaskList = () => {
+  const { user } = useAuth();
+  const { projectId } = useParams();
+  const [tasks, setTasks] = useState([]);
+
+  useEffect(() => {
+    // Load tasks from localStorage and filter by project ID
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    const projectTasks = storedTasks.filter(task => task.projectId === Number(projectId));
+    setTasks(projectTasks);
+  }, [projectId]);
+
+  //const assignedTasks = tasks.filter(task => task.assignedTo === user.username || user.role === "Team Leader");
+  const assignedTasks = user?.role === "Member"
+  ? tasks.filter(task => task.assignedTo === user.username) // ✅ Only tasks assigned to the logged-in Member
+  : tasks; // ✅ Team Leaders see all tasks in the project
+
+  const deleteTask = (taskId) => {
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    const updatedTasks = storedTasks.filter(task => task.id !== taskId);
+    localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+    setTasks(updatedTasks);
+  };
+
+  const handleUpdateStatus = (taskId, newStatus) => {
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    const updatedTasks = storedTasks.map(task =>
+      task.id === taskId ? { ...task, status: newStatus } : task
+    );
+    localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+    setTasks(updatedTasks);
+  };
+
+  return (
+    <div className="p-8 ml-64 text-white">
+      <h1 className="text-3xl font-bold mb-4">Tasks for Project {projectId}</h1>
+
+      {assignedTasks.length === 0 ? (
+        <p className="text-gray-400">No tasks added yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {assignedTasks.map(task => (
+            <div key={task.id} className="bg-gray-800 p-4 rounded-lg shadow-lg">
+              <h2 className="text-xl font-semibold">{task.name}</h2>
+              <p className="text-gray-300">{task.description}</p>
+              <p className="text-sm mt-2"><strong>Assigned to:</strong> {task.assignedTo}</p>
+              <p className="text-sm"><strong>Deadline:</strong> {task.deadline}</p>
+              <p className="text-sm"><strong>Status:</strong> {task.status}</p>
+
+              {user.role === "Team Leader" && (
+                <>
+                  <Link to={`/edit-task/${task.id}`} className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-700 mt-2 inline-block">
+                    Edit Task
+                  </Link>
+                  <button
+                    onClick={() => deleteTask(task.id)}
+                    className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-700 mt-2 inline-block ml-2"
+                  >
+                    Delete Task
+                  </button>
+                </>
+              )}
+
+              {user.role === "Member" && (
+                <div className="mt-2">
+                  <label className="block text-sm">Update Status:</label>
+                  <select
+                    className="w-full p-2 border rounded bg-gray-700 text-white"
+                    value={task.status}
+                    onChange={(e) => handleUpdateStatus(task.id, e.target.value)}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default TaskList;
+
+
+ManageMate Website\frontend\src\App.jsx:
+import { useState, useEffect } from "react";
+import { Routes, Route, Navigate } from "react-router-dom"; 
+import Layout from "./components/Layout"; // Import Layout
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import Dashboard from "./pages/Dashboard";
+import ProjectList from "./pages/ProjectList";
+import AddProject from "./pages/AddProject";
+import EditProject from './pages/EditProject';
+import AddTask from './pages/AddTask';
+import TaskList from "./pages/TaskList";
+import EditTask from "./pages/EditTask";
+import { useAuth } from "./context/AuthContext"; // Import useAuth to get user role
+
+function App() {
+  const { user } = useAuth(); // Get logged-in user details
+  const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
+
+  useEffect(() => {
+    const storedProjects = JSON.parse(localStorage.getItem("projects")) || [];
+    setProjects(storedProjects);
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    setTasks(storedTasks);
+  }, []);
+
+  // Save projects and tasks to localStorage when updated
+  useEffect(() => {
+    localStorage.setItem("projects", JSON.stringify(projects));
+    localStorage.setItem("tasks", JSON.stringify(tasks));
+  }, [projects, tasks]);
+
+  const addProject = (newProject) => {
+    setProjects([...projects, newProject]);
+  };
+  const updateProject = (updatedProject) => {
+    setProjects(
+      projects.map((project) => (project.id === updatedProject.id ? updatedProject : project))
+    );
+  };
+
+  const addTask = (newTask) => {
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    const updatedTasks = [...storedTasks, newTask];
+    localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+    setTasks(updatedTasks);
+  };
+
+  const updateTask = (updatedTask) => {
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    const updatedTasks = storedTasks.map((task) =>
+      task.id === updatedTask.id ? updatedTask : task
+    );
+    localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+    setTasks(updatedTasks);
+  };
+
+  const deleteTask = (taskId) => {
+    const storedTasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    const updatedTasks = storedTasks.filter((task) => task.id !== taskId);
+    localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+    setTasks(updatedTasks);
+  };
+
+  return (
+    <Routes>
+      <Route path="/" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route element={<Layout/>}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/projects" element={user?.role ? <ProjectList projects={projects} /> : <Navigate to="/" />} />
+        <Route path="/add-project" element={user?.role === "Manager" ? <AddProject addProject={addProject} /> : <Navigate to="/dashboard" />} />
+        <Route path="/edit-project/:id" element={user?.role === "Project Leader" ? <EditProject projects={projects} updateProject={updateProject} /> : <Navigate to="/dashboard" />} />
+        <Route path="/add-task/:projectId" element={user?.role === "Project Leader" ? <AddTask addTask={addTask} /> : <Navigate to="/dashboard" />} />
+        <Route path="/tasks/:projectId" element={user?.role ? <TaskList deleteTask={deleteTask} /> : <Navigate to="/" />} />
+        <Route path="/edit-task/:taskId" element={user?.role === "Project Leader" || user?.role === "Team Member" ? <EditTask tasks={tasks} updateTask={updateTask} /> : <Navigate to="/dashboard" />} />
+      </Route>
+    </Routes>
+  );
+}
+
+export default App;
+
+
+ManageMate Website\frontend\src\main.jsx:
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom"; // Import BrowserRouter
+import { AuthProvider } from "./context/AuthContext"; // Import AuthProvider
+import { ProjectProvider } from "./context/ProjectContext.jsx"; // Import ProjectProvider
+import "./index.css";
+import App from "./App.jsx";
+
+createRoot(document.getElementById("root")).render(
+  <StrictMode>
+    <BrowserRouter> {/* Wrap the whole app inside BrowserRouter */}
+      <AuthProvider> {/* Wrap AuthProvider to provide authentication */}
+        <ProjectProvider>{/* Wrap App with ProjectProvider */}
+          <App />
+        </ProjectProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  </StrictMode>
+);
+
+

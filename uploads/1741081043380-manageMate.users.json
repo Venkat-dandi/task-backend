@@ -1,0 +1,68 @@
+[{
+  "_id": {
+    "$oid": "67c6a00730d81317bcc9efdd"
+  },
+  "name": "venkat dandi",
+  "email": "venkatdandi70@gmail.com",
+  "password": "$2b$10$ylpPRQn4AHSVIloBRMPEo.Bu1BRG1vzmEE83JZGABYRR0GLWG96z2",
+  "role": "Project Leader",
+  "assignedProject": [],
+  "createdAt": {
+    "$date": "2025-03-04T06:39:03.621Z"
+  },
+  "updatedAt": {
+    "$date": "2025-03-04T06:39:03.621Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "67c6a07d30d81317bcc9efe5"
+  },
+  "name": "manager 1",
+  "email": "manager1@gmail.com",
+  "password": "$2b$10$x4lFMkvZnAkQAl/l.1ZDQOLxmz0Yw.TLvhEl8Lj8em8yLkWdTIw2e",
+  "role": "Manager",
+  "assignedProject": [],
+  "createdAt": {
+    "$date": "2025-03-04T06:41:01.115Z"
+  },
+  "updatedAt": {
+    "$date": "2025-03-04T06:41:01.115Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "67c6a537726e498125088e69"
+  },
+  "name": "akchatjain",
+  "email": "akchatjain@gmail.com",
+  "password": "$2b$10$LX4TRKRYHDvqvzZPzhgheeSw7aIuDDuQAUgpBAWfpKM3STIxJkTLK",
+  "role": "Team Member",
+  "assignedProject": [],
+  "createdAt": {
+    "$date": "2025-03-04T07:01:11.633Z"
+  },
+  "updatedAt": {
+    "$date": "2025-03-04T07:01:11.633Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "67c6b92a2739569488b863aa"
+  },
+  "name": "leader2",
+  "email": "leader2@gmail.com",
+  "password": "$2b$10$iJQ1j80CiAU4QPV/pCLCDekMcUZDMdOnJ0BqdnY8Fs2eZWCOSoI9m",
+  "role": "Project Leader",
+  "assignedProject": [],
+  "createdAt": {
+    "$date": "2025-03-04T08:26:18.063Z"
+  },
+  "updatedAt": {
+    "$date": "2025-03-04T08:26:18.063Z"
+  },
+  "__v": 0
+}]

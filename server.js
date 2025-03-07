@@ -16,10 +16,10 @@ const dashboardRoutes = require("./src/routes/dashboard");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "https://task-frontend-ez1c-epy1cbfv7-venkat-dandis-projects.vercel.app" } });
+const io = new Server(server, { cors: { origin: "https://task-frontend-mauve.vercel.app" } });
 
 app.use(cors({
-    origin: "https://task-frontend-ez1c-epy1cbfv7-venkat-dandis-projects.vercel.app",
+    origin: "https://task-frontend-mauve.vercel.app",
     credentials: true
 }));
 app.use(express.json());

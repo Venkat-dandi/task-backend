@@ -16,10 +16,10 @@ const dashboardRoutes = require("./src/routes/dashboard");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "http://localhost:5173" } });
+const io = new Server(server, { cors: { origin: "https://task-frontend-ez1c.vercel.app/" } });
 
 app.use(cors({
-    origin: "http://localhost:5173",
+    origin: "https://task-frontend-ez1c.vercel.app/",
     credentials: true
 }));
 app.use(express.json());
